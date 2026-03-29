@@ -62,6 +62,28 @@
       margin-top: 20px;
     }
 
+    .api-config {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .api-config input {
+      flex: 1;
+      min-width: 320px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+    }
+
+    .api-note {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
     input[type="file"] {
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -167,6 +189,12 @@
         <button id="runBtn" onclick="uploadAndProcess()">Run Pipeline</button>
       </div>
 
+      <div class="api-config">
+        <input id="apiBaseInput" type="text" placeholder="https://YOUR-RENDER-URL.onrender.com" />
+        <button id="saveApiBtn" onclick="saveApiBase()">Save API URL</button>
+        <span id="apiBaseHint" class="api-note"></span>
+      </div>
+
       <div id="status">Select an Excel file and click "Run Pipeline".</div>
 
       <div id="resultsWrap" class="table-wrap">
@@ -188,8 +216,45 @@
   </div>
 
   <script>
-    const API_BASE = "http://127.0.0.1:8000";
+    const DEFAULT_RENDER_API_BASE = "https://YOUR-RENDER-URL.onrender.com";
+    const API_BASE_STORAGE_KEY = "brokai_lead_intel_api_base";
     const STORAGE_KEY = "brokai_lead_intel_last_state";
+    let API_BASE = "";
+
+    function resolveApiBase() {
+      const saved = localStorage.getItem(API_BASE_STORAGE_KEY);
+      if (saved && saved.trim()) {
+        return saved.trim();
+      }
+
+      if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+        return "http://127.0.0.1:8000";
+      }
+
+      return DEFAULT_RENDER_API_BASE;
+    }
+
+    function refreshApiHint() {
+      const hint = document.getElementById("apiBaseHint");
+      if (!hint) return;
+      hint.textContent = `Current API: ${API_BASE}`;
+    }
+
+    function saveApiBase() {
+      const input = document.getElementById("apiBaseInput");
+      const value = String(input?.value || "").trim();
+
+      if (!value) {
+        localStorage.removeItem(API_BASE_STORAGE_KEY);
+        API_BASE = resolveApiBase();
+        refreshApiHint();
+        return;
+      }
+
+      localStorage.setItem(API_BASE_STORAGE_KEY, value);
+      API_BASE = value;
+      refreshApiHint();
+    }
 
     function saveAppState(partialState) {
       const current = loadAppState();
@@ -390,6 +455,14 @@
     window.addEventListener("DOMContentLoaded", async () => {
       const status = document.getElementById("status");
       const runBtn = document.getElementById("runBtn");
+      const apiBaseInput = document.getElementById("apiBaseInput");
+
+      API_BASE = resolveApiBase();
+      if (apiBaseInput) {
+        apiBaseInput.value = API_BASE;
+      }
+      refreshApiHint();
+
       const saved = loadAppState();
 
       if (saved.statusText) {
