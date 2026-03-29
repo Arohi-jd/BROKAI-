@@ -19,7 +19,6 @@ All three steps are wired together as a [LangGraph](https://github.com/langchain
 ## 🖼️ Output
 
 <!-- Add your output screenshot(s) here -->
-> _Screenshots coming soon — upload yours here!_
 
 ---
 
