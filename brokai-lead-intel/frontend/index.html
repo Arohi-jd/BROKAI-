@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Brokai Lead Intelligence</title>
+  <style>
+    :root {
+      --bg: #f7f9fc;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --border: #e5e7eb;
+      --error-bg: #fff1f2;
+      --error-text: #9f1239;
+      --bubble-bg: #e0f2fe;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 32px auto;
+      padding: 0 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      margin-top: 8px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+
+    input[type="file"] {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+    }
+
+    button {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:hover:enabled {
+      background: var(--primary-dark);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    #status {
+      margin-top: 16px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .table-wrap {
+      margin-top: 20px;
+      overflow-x: auto;
+      display: none;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1100px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    th {
+      background: #f8fafc;
+      font-weight: 700;
+    }
+
+    .message-bubble {
+      background: var(--bubble-bg);
+      border: 1px solid #bae6fd;
+      border-radius: 10px;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      white-space: pre-wrap;
+    }
+
+    .error-row {
+      background: var(--error-bg);
+    }
+
+    .error-badge {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #ffe4e6;
+      color: var(--error-text);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    a {
+      color: #0369a1;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>Brokai Lead Intelligence</h1>
+      <p class="subtitle">
+        Upload an Excel sheet of companies and let a multi-agent pipeline research each one,
+        find contact details, and generate personalised outreach messages automatically.
+      </p>
+
+      <div class="controls">
+        <input id="excelFile" type="file" accept=".xlsx,.xls" />
+        <button id="runBtn" onclick="uploadAndProcess()">Run Pipeline</button>
+      </div>
+
+      <div id="status">Select an Excel file and click "Run Pipeline".</div>
+
+      <div id="resultsWrap" class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>What They Do</th>
+              <th>Size &amp; Presence</th>
+              <th>Existing Tools</th>
+              <th>Contact Info</th>
+              <th>Outreach Message</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+    const STORAGE_KEY = "brokai_lead_intel_last_state";
+
+    function saveAppState(partialState) {
+      const current = loadAppState();
+      const next = {
+        ...current,
+        ...partialState,
+        updatedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    }
+
+    function loadAppState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return {};
+        return JSON.parse(raw);
+      } catch {
+        return {};
+      }
+    }
+
+    function safe(value, fallback = "-") {
+      const text = String(value ?? "").trim();
+      return text ? text : fallback;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function renderResults(results) {
+      const body = document.getElementById("resultsBody");
+      const wrap = document.getElementById("resultsWrap");
+      body.innerHTML = "";
+
+      results.forEach((row) => {
+        const tr = document.createElement("tr");
+        const hasError = String(row.error || "").trim().length > 0;
+        if (hasError) tr.classList.add("error-row");
+
+        const companyCell = `
+          <strong>${escapeHtml(safe(row.company_name))}</strong><br />
+          <span style="color:#64748b">${escapeHtml(safe(row.location))}</span>
+          ${hasError ? `<div class="error-badge">${escapeHtml(row.error)}</div>` : ""}
+        `;
+
+        const sizePresenceCell = `
+          <div><strong>Size:</strong> ${escapeHtml(safe(row.size_signals, "Not available"))}</div>
+          <div style="margin-top:6px"><strong>Presence:</strong> ${escapeHtml(safe(row.digital_presence, "Not available"))}</div>
+        `;
+
+        const sourceLink = row.source_url
+          ? `<div style="margin-top:6px"><a href="${escapeHtml(row.source_url)}" target="_blank" rel="noopener noreferrer">View source</a></div>`
+          : "";
+
+        const contactCell = `
+          <div><strong>Phone:</strong> ${escapeHtml(safe(row.phone, "Not found"))}</div>
+          <div><strong>Email:</strong> ${escapeHtml(safe(row.email, "Not found"))}</div>
+          <div><strong>WhatsApp:</strong> ${escapeHtml(safe(row.whatsapp, "Not found"))}</div>
+          ${sourceLink}
+        `;
+
+        const outreachCell = `<div class="message-bubble">${escapeHtml(safe(row.outreach_message, "No message generated."))}</div>`;
+
+        tr.innerHTML = `
+          <td>${companyCell}</td>
+          <td>${escapeHtml(safe(row.what_they_do, "Not available"))}</td>
+          <td>${sizePresenceCell}</td>
+          <td>${escapeHtml(safe(row.existing_tools, "Not available"))}</td>
+          <td>${contactCell}</td>
+          <td>${outreachCell}</td>
+        `;
+
+        body.appendChild(tr);
+      });
+
+      wrap.style.display = results.length ? "block" : "none";
+      saveAppState({ results, total: results.length });
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function runSynchronousFallback(file, status) {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`${API_BASE}/process`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      const results = Array.isArray(data.results) ? data.results : [];
+      renderResults(results);
+      status.textContent = `Done — ${results.length} companies processed`;
+    }
+
+    async function uploadAndProcess() {
+      const fileInput = document.getElementById("excelFile");
+      const runBtn = document.getElementById("runBtn");
+      const status = document.getElementById("status");
+      const file = fileInput.files[0];
+
+      if (!file) {
+        status.textContent = "Please select an Excel file first.";
+        return;
+      }
+
+      runBtn.disabled = true;
+      status.textContent = "Processing...";
+      saveAppState({ statusText: "Processing..." });
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        let startResponse;
+        try {
+          startResponse = await fetch(`${API_BASE}/process/start`, {
+            method: "POST",
+            body: formData,
+          });
+        } catch (startErr) {
+          // If start endpoint is unavailable, fallback to synchronous endpoint.
+          await runSynchronousFallback(file, status);
+          return;
+        }
+
+        if (!startResponse.ok) {
+          await runSynchronousFallback(file, status);
+          return;
+        }
+
+        const startData = await startResponse.json();
+        if (!startData.ok || !startData.job_id) {
+          await runSynchronousFallback(file, status);
+          return;
+        }
+
+        const jobId = startData.job_id;
+        const totalRows = Number(startData.total_rows || 0);
+        status.textContent = `Processing row 0/${totalRows}...`;
+        saveAppState({ statusText: status.textContent, processing: true, jobId, totalRows });
+
+        while (true) {
+          await sleep(1200);
+
+          const pollResponse = await fetch(`${API_BASE}/process/status/${jobId}`);
+          if (!pollResponse.ok) {
+            throw new Error(`Status polling failed (${pollResponse.status})`);
+          }
+
+          const pollData = await pollResponse.json();
+          const done = Boolean(pollData.done);
+          const processedRows = Number(pollData.processed_rows || 0);
+          const pollTotalRows = Number(pollData.total_rows || totalRows || 0);
+
+          status.textContent = `Processing row ${processedRows}/${pollTotalRows}...`;
+          saveAppState({ statusText: status.textContent, processing: true, jobId, totalRows: pollTotalRows, processedRows });
+
+          if (done) {
+            if (pollData.status === "failed") {
+              throw new Error(pollData.error || "Background job failed.");
+            }
+
+            const results = Array.isArray(pollData.results) ? pollData.results : [];
+            renderResults(results);
+            status.textContent = `Done — ${results.length} companies processed`;
+            saveAppState({ statusText: status.textContent, processing: false, jobId: "", results, total: results.length });
+            break;
+          }
+        }
+      } catch (error) {
+        console.error(error);
+        const message = String(error?.message || "");
+        if (message.toLowerCase().includes("failed to fetch")) {
+          status.textContent = "Error: Cannot reach backend. Check API_BASE and ensure backend is running on http://127.0.0.1:8000.";
+        } else {
+          status.textContent = `Error: ${message || "Failed to process file."}`;
+        }
+        saveAppState({ statusText: status.textContent, processing: false });
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      const status = document.getElementById("status");
+      const runBtn = document.getElementById("runBtn");
+      const saved = loadAppState();
+
+      if (saved.statusText) {
+        status.textContent = saved.statusText;
+      }
+
+      if (Array.isArray(saved.results) && saved.results.length) {
+        renderResults(saved.results);
+      }
+
+      if (saved.processing && saved.jobId) {
+        runBtn.disabled = true;
+        try {
+          while (true) {
+            await sleep(1200);
+            const pollResponse = await fetch(`${API_BASE}/process/status/${saved.jobId}`);
+            if (!pollResponse.ok) break;
+
+            const pollData = await pollResponse.json();
+            const done = Boolean(pollData.done);
+            const processedRows = Number(pollData.processed_rows || 0);
+            const pollTotalRows = Number(pollData.total_rows || saved.totalRows || 0);
+
+            status.textContent = `Processing row ${processedRows}/${pollTotalRows}...`;
+            saveAppState({ statusText: status.textContent, processedRows, totalRows: pollTotalRows, processing: !done });
+
+            if (done) {
+              const results = Array.isArray(pollData.results) ? pollData.results : [];
+              renderResults(results);
+              status.textContent = `Done — ${results.length} companies processed`;
+              saveAppState({ statusText: status.textContent, processing: false, jobId: "", results, total: results.length });
+              break;
+            }
+          }
+        } catch {
+          status.textContent = "Processing state restored. Click Run Pipeline to continue if needed.";
+          saveAppState({ statusText: status.textContent, processing: false });
+        } finally {
+          runBtn.disabled = false;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
